@@ -1,0 +1,537 @@
+---
+title: "Time-Series-Analysis-of-Personal-Consumption-Expendidures"
+author: "AyşegülBinbaş"
+date: "06 02 2022"
+output: html_document
+---
+
+```{r}
+library(TSA)
+library(readxl)
+library(ggplot2)
+library(stats)
+library(forecast)
+library(gridExtra)
+library(tseries)
+library(tidyverse) 
+library(tidyquant)  
+#install.packages("tidyquant")
+library(anomalize)  # Identify and clean time series anomalies
+library(timetk)     # Time Series Machine Learning Features
+library(knitr)      # For kable() function: This is a very simple table generator. 
+library(tibbletime)
+library(uroot)
+library(fUnitRoots)
+library(fpp)
+library(lmtest)
+library(prophet)
+library(plotly)
+library(greybox)
+#install.packages("greybox")
+library(fpp2)
+library(nnfor)
+#install.packages("nnfor")
+#install.packages("rmgarch")
+library(rugarch)
+library(rmgarch)
+library(forecast)
+library(MTS)
+#install.packages("MTS")
+
+# STEP1:
+PersonalConsumptionExpenditures <- read_excel("C:/Users/90551/Desktop/TIMESERIES-PROJECT/FİNAL-PROJE/PersonalConsumptionExpenditures.xls",col_names =T)
+
+head(PersonalConsumptionExpenditures)
+class(PersonalConsumptionExpenditures)
+
+#It is data frame, so we need to make it ts.
+
+#extract the column of interest (PersonalConsumptionExpenditures[,2])
+#To get rid of the pandemic effect, the data set taken up to 2018.
+
+PC<- ts(PersonalConsumptionExpenditures[,2],start=c(1959,1,1),end=c(2018,12,1),12)
+head(PC)
+class(PC)
+tail(PC)
+
+
+
+
+
+plot(PC,main="Personal Consumption Expenditures in U.S.")
+
+#The series is not stationary because it is seen that there is an increasing trend.
+# We haven’t known the type of trend yet.There is no significant outliers.
+
+library(forecast)
+
+
+ggAcf(PC,main="Autocorrelation Function of Personal Consumption Expenditures")
+ggPacf(PC,main="Partial Autocorrelation Function of Personal Consumption Expenditures")
+
+library(tseries)
+
+#STEP2 :
+#We have 720 row in data set , for %80 part ,hence last 144 obs is used for test:
+length(PC)
+#trainindex=1:(length(PC)-144)
+#train=PC[trainindex]
+#test=PC[-trainindex]
+
+
+
+tr=window(PC,end=c(2006,12))
+te=window(PC,start=c(2007,01))
+length(te)
+#graph for train data :
+
+plot(tr,main="Personal Consumption Expenditures in U.S.")
+
+ggAcf(tr,main="Autocorrelation Function of Personal Consumption Expenditures")
+ggPacf(tr,main="Partial Autocorrelation Function of Personal Consumption Expenditures")
+
+
+#Step 3:
+#	Box-Cox transformation analysis: 
+lambda <- BoxCox.lambda(tr)
+lambda
+transformed_traindata <- BoxCox(tr,lambda)
+class(transformed_traindata)
+
+
+
+#STEP4 :
+#install.packages("tidyverse")
+library(anomalize) #tidy anomaly detectiom
+library(tidyverse)#tidyverse packages like dplyr, ggplot, tidyr
+#library(coindeskr) 
+library(anomalize)
+
+#AnomalyDetection:
+
+
+tsoutliers(transformed_traindata)
+class(transformed_traindata)
+cleaned_transformed_traindata=tsclean(transformed_traindata)
+
+# The tsclean() function removes outliers identified in this way,
+# and replaces them (and any missing values) with linearly interpolated replacements.
+
+autoplot(transformed_traindata)
+
+
+
+
+autoplot(tsclean(transformed_traindata), series="clean", color='red', lwd=0.9) +
+  autolayer(transformed_traindata, series="original", color='gray', lwd=1) +
+  geom_point(data = tsoutliers(transformed_traindata) %>% as.data.frame(), 
+             aes(x=index, y=replacements), col='blue') +
+  labs(x = "date", y = "Personal Consumption Expenditure in U.S.")
+
+
+
+
+
+#STEP5-6:
+
+#After transformation and anormally detection,the stationary was checked :
+
+head(cleaned_transformed_traindata)
+data=as.ts(cleaned_transformed_traindata)
+ggAcf(cleaned_transformed_traindata,main="Autocorrelation Function of Personal Consumption Expenditures")
+ggPacf(cleaned_transformed_traindata,main="Partial Autocorrelation Function of Personal Consumption Expenditures")
+
+library(pdR)
+
+class(cleaned_transformed_traindata)
+hegy.out<-HEGY.test(cleaned_transformed_traindata, itsd=c(0,0,0),regvar=0, selectlags=list(mode="aic", Pmax=12))
+hegy.out$stats #HEGY test statistics
+
+#  Fpi_11:12 for testing seasonal unit root,p-value=0.01 <0.05 ,so we do not have any seasonal unit root..
+# p value of tpi_1 for regular unit root , p-value=0.1 > 0.05,we have regular unit root.
+#To solve this problem, we need to take regular differencing.
+
+ndiffs(cleaned_transformed_traindata)
+nsdiffs(cleaned_transformed_traindata)
+nsdiffs(diff(diff(cleaned_transformed_traindata)))
+
+dif=diff(cleaned_transformed_traindata)
+hegy.out<-HEGY.test(dif, itsd=c(0,0,0),regvar=0, selectlags=list(mode="aic", Pmax=12))
+hegy.out$stats #HEGY test statistics
+
+#there exist regular unit root problem.
+
+dif2=diff(dif)
+hegy.out<-HEGY.test(dif2, itsd=c(0,0,0),regvar=0, selectlags=list(mode="aic", Pmax=12))
+hegy.out$stats #HEGY test statistics
+library(pdR)
+#the problem was solved.
+
+
+plot(dif2,main="Personal Consumption Expenditures in U.S.")
+
+#The series seems stationary around 0 mean.
+
+
+library(forecast)
+
+
+ggAcf(dif2,main="Autocorrelation Function of Personal Consumption Expenditures")
+ggPacf(dif2,main="Partial Autocorrelation Function of Personal Consumption Expenditures")
+
+#  We can use the serial model with 2 regular diffs, or we can use the serial model with 1 regular diff and  1 seasonal diff.
+
+#  According to graph, there exists seasonal pattern.So we can take seasonal diff of dif1.
+sea_dif=diff(dif,12)
+
+hegy.out<-HEGY.test(sea_dif, itsd=c(0,0,0),regvar=0, selectlags=list(mode="aic", Pmax=12))
+hegy.out$stats #HEGY test statistics
+
+plot(sea_dif,main="Personal Consumption Expenditures in U.S.")
+
+#The series seems stationary around0 .
+
+library(forecast)
+
+ggAcf(sea_dif,main="Autocorrelation Function of Personal Consumption Expenditures")
+ggPacf(sea_dif,main="Partial Autocorrelation Function of Personal Consumption Expenditures")
+
+# model is ARIMA(1,1,1)(1,1,1)12
+
+
+
+
+#Step7:
+plot(dif2,main="Personal Consumption Expenditures in U.S.")
+ggAcf(dif2,main="Autocorrelation Function of Personal Consumption Expenditures")
+ggPacf(dif2,main="Partial Autocorrelation Function of Personal Consumption Expenditures")
+
+#Step8:
+
+#ARIMA(3,2,1)(2,0,2)
+#ARIMA(3,2,1)(0,0,2)
+
+eacf(dif2)
+#ARIMA(0,2,1)
+#ARIMA(0,2,3)
+#ARIMA(2,2,3)
+#ARIMA(0,2,3)
+
+
+#Step9 :
+
+#Suggested models are;
+
+
+#ARIMA(3,2,1)(0,0,2)
+#ARIMA(3,2,1)(2,0,2)
+#ARIMA(0,2,1)
+#ARIMA(2,2,3)
+
+fit1<-auto.arima(cleaned_transformed_traindata)
+fit1
+
+#For sifnificant checking, let's look at t_statistic= estimate/s.e =8.34
+#It is not in the range so, model is significant.
+
+
+#ARIMA(3,2,1)(0,0,2)
+fit2=Arima(cleaned_transformed_traindata,order=c(3,2,1),seasonal=list(order=c(0,0,2), period=12))
+fit2
+#The model is not significant.
+
+#ARIMA(3,2,1)(2,0,2)
+fit3=Arima(cleaned_transformed_traindata,order=c(3,2,1),seasonal=list(order=c(2,0,2), period=12))
+fit3
+#The model is not significant.
+
+#ARIMA(0,2,1)
+
+fit4=stats::arima(cleaned_transformed_traindata,order=c(0,2,1), method="ML")
+fit4
+#The model is significant.
+
+
+
+#ARIMA(2,2,3)
+
+fit5=stats::arima(cleaned_transformed_traindata,order=c(2,2,3), method="ML")
+fit5
+#The model is not significant.
+
+#Significant models :
+
+fit<-auto.arima(cleaned_transformed_traindata)
+fit1
+#fit1 aic is aic = -2962.11
+
+fit4=stats::arima(cleaned_transformed_traindata,order=c(0,2,1), method="ML")
+fit4
+#fit4 aic is AIC=-3331.31
+
+
+#Step10: Diagnostic Checking: 
+
+#For fit4
+
+tsdiag(fit4)
+r=resid(fit4)
+ggplot(r,aes(x=r))+geom_histogram(bins=20)+geom_density()+ggtitle("Histogram of Residuals")+theme_minimal()
+qqnorm(rstandard(fit4))
+qqline(rstandard(fit4))
+#install.packages("vars")
+#H0= Residuals are normal.
+#H1= Residuals are not normal.
+shapiro.test(r)
+shapiro.test(window(rstandard(fit3),start=1959))
+
+
+
+# #Shapiro-Wilk shows that errors do not distributed normally. (p<0.05)
+
+
+# Serial Autocorrelation
+
+#H0= There is no serial autocorrelation.
+
+#H1= There is serial autocorrelation.
+
+m=lm(r ~ 1+zlag(r))
+m
+
+bgtest(m,order=15)
+
+# According to the Breusch-Godfrey Test ,the p- value is bigger than 0.05, fail to reject H0. 
+#There is serial correlation between the residuals.
+
+par(mfrow=c(1,2))
+acf(as.vector(window(rstandard(fit4), start=1959)), lag.max=36)
+pacf(as.vector(window(rstandard(fit4), start=1959)), lag.max=36)
+#For all time points, ACF and PACF values are not in the white noise bands.
+
+
+
+
+# Heteroscedasticty
+
+#H0= There is no heteroscedasticity.
+
+#H1= There is heteroscedasticity.
+library(aTSA)
+
+arch.test(fit4)
+
+
+Box.test(rstandard(fit4),type = c("Ljung-Box"))
+#the p value is less than 0.05,reject ho. So we have serially correlation in the residuals.
+
+rr=rstandard(fit4)^2
+par(mfrow=c(1,2))
+acf(as.vector(rr))
+pacf(as.vector(rr))
+
+#There is heteroscedasticity problem.
+#For all time points, ACF and PACF values are not in the white noise bands. Then there exists serially autocorrelation.
+#We can use ARCH/GARCH models.
+
+
+
+
+
+
+#Step11 :
+
+
+length(te)
+
+#a:
+#Forcast for fit3 : 
+forecast_fit4<-forecast::forecast(cleaned_transformed_traindata,model=fit3, h=144)
+forecast_fit4
+accuracy(forecast_fit4)
+
+
+#Forcast for fit1 :
+#For fit5
+forecast_fit1<-forecast::forecast(cleaned_transformed_traindata,model=fit1, h=144)
+forecast_fit1
+accuracy(forecast_fit1)
+
+# According to RMSE,MAE,MAPE results, we can clearly say that fit4 model has lowest values .
+
+
+#b:
+
+
+ets(tr)
+fit_ets<- ets(tr, model = "MAN")
+fit_ets
+
+forecast_fit_ets<- forecast::forecast(fit_ets, h=144)
+forecast_fit_ets
+
+#c:
+
+ds=c(seq(as.Date("1959/01/01"),as.Date("2006/12/01"),by="month"))
+head(ds)
+df=data.frame(ds,y=as.numeric(tr))
+head(df)
+fit_prophet= prophet(df)
+
+fit_prophet
+
+
+future=make_future_dataframe(fit_prophet,freq="month",periods = 12)
+prophet_forecast = predict(fit_prophet, future)
+
+accuracy(tail(prophet_forecast$yhat,144),te)
+
+#D:
+
+fit_tbats= tbats(tr)
+fit_tbats
+future_tbats=forecast::forecast(fit_tbats, h=144)
+future_tbats
+
+#e)
+fit_nnetar= nnetar(tr)
+fit_nnetar
+future_nnetar=forecast::forecast(fit_nnetar,h=144)
+future_nnetar
+
+#Heterodastisity assumption did not satisfied,ı will also try to use ARCH model.
+
+#For ARCH model:
+
+fit4
+resid=resid(fit4)
+
+
+# Now, lets again consider checking heteroscedasticity assumption using visual tools.ACF & PACF of Squared Residuals
+
+sqresid=r^2
+k1<-ggAcf(as.vector(sqresid),main="ACF of Squared Residuals")+theme_minimal()
+k2<-ggPacf(as.vector(sqresid),main="PACF of Squared Residuals")+theme_minimal() # homoscedasticity check
+
+grid.arrange(k1,k2,ncol=2)
+
+# Both plots shows that some spikes are out of the white noise bands, i.e there is a correlation between them, that is an indication of heteroscedasticity problem and usage of (G)ARCH model.
+# However, we need to also check this sitution using a formal test.
+
+#Engle’s ARCH Test.
+
+#This test is a Lagrange Multiplier test and uses the following hypothesis.
+
+#Ho: Residuals exhibits no ARCH effects.
+
+#H1: ARCH(lag) effects are present.
+
+library(MTS)
+archTest(resid)
+#Since p values is less than α, we reject H0. Therefore, we can conclude the presence of ARCH effects.
+
+# start with default GARCH spec.
+spec = ugarchspec() #the empty function specifies the default model. 
+print(spec)
+
+library(rugarch)
+def.fit = ugarchfit(spec = spec, data = tr)
+print(def.fit)
+
+
+# In this output, there are several test results related to residuals of the process. lets see what these tests do.
+#First of all, the estimated parameter of ARIMA(1,1) and GARCH(1,1) models were exhibited.
+# It is seen except omega parameter, which is the expected variance value at time t for zero residual and lagged variance values, all parameters are significant.
+
+
+
+#STEP12
+new_forecast_fit4=predict(fit4, n.ahead =144)
+new_forecast_fit4
+forecast_back<-InvBoxCox(new_forecast_fit4$pred,lambda)
+forecast_back
+
+# See LCI and UCI
+
+LCI=ts(new_forecast_fit4$pred-1.96*new_forecast_fit4$se,start=c(2007),frequency=12)
+UCI=ts(new_forecast_fit4$pred+1.96*new_forecast_fit4$se,start=c(2007),frequency=12)
+
+LCI_back=InvBoxCox(LCI,lambda)
+UCI_back=InvBoxCox(UCI,lambda)
+
+
+#STEP13 :
+
+
+#fit4 ARIMA(0, 2, 1)
+accuracy(forecast_back,te)
+accuracy(forecast_fit_ets,te)
+accuracy(future_tbats,te)
+accuracy(tail(prophet_forecast$yhat,144),te)
+accuracy(future_nnetar,te)
+
+
+
+#According to RMSE values, est model has the lowet value.So, the model give the best performance.
+
+
+#STEP14:
+
+
+
+#ARIMA(0,2,1) model plot
+
+autoplot(InvBoxCox(fitted(fit4), lambda), series = "Fitted",main="ARIMA(0,2,1) MODEL FORECASTING")+
+  autolayer(forecast_back, series="Forecasts")+
+  autolayer(PC, series="PC")+
+  autolayer(LCI_back, series="LCI")+
+  autolayer(UCI_back, series="UCI")+
+  geom_vline(xintercept = 2016, color="brown", series="Forecast starting Line")+
+  theme_minimal()
+
+
+#etc model
+autoplot(forecast_fit_ets, series="forecast Points")+ 
+  autolayer(fitted(forecast_fit_ets), series="fitted")+
+  autolayer(te, series = "test data")+autolayer(tr, series = "train set")+
+  geom_vline(xintercept = 2016, color="purple")+theme_minimal()
+
+#tbats model
+autoplot(future_tbats, series="forecast Points")+
+  autolayer(fitted(future_tbats), series="fitted")+
+  autolayer(te, series = "test data")+
+  autolayer(tr, series = "train set")+
+  geom_vline(xintercept = 2016, color="purple")+
+  theme_minimal()
+
+
+#nnetar model
+autoplot(future_nnetar, series="forecast Points")+
+  autolayer(fitted(future_nnetar), series="fitted")+
+  autolayer(te, series = "test data")+
+  autolayer(tr, series = "train set")+
+  geom_vline(xintercept = 2016, color="purple")+theme_minimal()
+
+
+#prophet model
+plot(fit_prophet, prophet_forecast)+theme_minimal()
+
+
+
+#Conlusion :
+#In this project, firstly, I divided the data into 2 as train and test. (80% of the data was used as train). 
+#Then, Box-Cox transformation was done and data was cleared from unusual data.
+# Models were created from the stationary train data, and the most suitable model was selected, and predictions were made with different methods.
+#the results of all test, acf&pacf and other plots,checking their accuracy and diagnostic checking ı may obtain the best performed model, and this is ets model.
+
+
+
+
+
+
+
+
+
+
+```
+
